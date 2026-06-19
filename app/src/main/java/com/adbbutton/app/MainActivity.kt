@@ -7,11 +7,13 @@ import android.net.nsd.NsdManager
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
+import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.adbbutton.app.databinding.ActivityMainBinding
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -29,18 +31,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
         setupUI()
         updateConnectionStatus()
     }
 
     private fun setupUI() {
         binding.btnOverlayPermission.setOnClickListener {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-            startActivity(intent)
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         }
 
         binding.btnAutoDiscover.setOnClickListener {
@@ -52,7 +49,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnPairConnect.setOnClickListener {
-            showPairDialog()
+            showFullPairDialog()
         }
 
         binding.btnStartFloating.setOnClickListener {
@@ -62,22 +59,19 @@ class MainActivity : AppCompatActivity() {
             }
             if (!Settings.canDrawOverlays(this)) {
                 Toast.makeText(this, "Ekran üstü çizim izni gerekli!", Toast.LENGTH_SHORT).show()
-                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-                startActivity(intent)
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
                 return@setOnClickListener
             }
-            val intent = Intent(this, FloatingButtonService::class.java).apply {
+            startForegroundService(Intent(this, FloatingButtonService::class.java).apply {
                 action = FloatingButtonService.ACTION_START
-            }
-            startForegroundService(intent)
+            })
             Toast.makeText(this, "Yüzen buton başlatıldı!", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnStopFloating.setOnClickListener {
-            val intent = Intent(this, FloatingButtonService::class.java).apply {
+            startService(Intent(this, FloatingButtonService::class.java).apply {
                 action = FloatingButtonService.ACTION_STOP
-            }
-            startService(intent)
+            })
         }
 
         binding.btnDisconnect.setOnClickListener {
@@ -88,14 +82,13 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences(FloatingButtonService.PREF_NAME, MODE_PRIVATE)
 
-        val sizeDp = prefs.getInt(FloatingButtonService.PREF_SIZE, 64)
-        binding.seekBarSize.progress = sizeDp
-        binding.tvSizeValue.text = "${sizeDp}dp"
+        binding.seekBarSize.progress = prefs.getInt(FloatingButtonService.PREF_SIZE, 64)
+        binding.tvSizeValue.text = "${binding.seekBarSize.progress}dp"
         binding.seekBarSize.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                val clamped = progress.coerceIn(32, 128)
-                binding.tvSizeValue.text = "${clamped}dp"
-                prefs.edit().putInt(FloatingButtonService.PREF_SIZE, clamped).apply()
+                val v = progress.coerceIn(32, 128)
+                binding.tvSizeValue.text = "${v}dp"
+                prefs.edit().putInt(FloatingButtonService.PREF_SIZE, v).apply()
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
@@ -106,27 +99,33 @@ class MainActivity : AppCompatActivity() {
         binding.tvIntervalValue.text = "${intervalMs}ms"
         binding.seekBarInterval.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                val clamped = progress.coerceIn(50, 1000)
-                binding.tvIntervalValue.text = "${clamped}ms"
-                prefs.edit().putLong(FloatingButtonService.PREF_TAP_INTERVAL, clamped.toLong()).apply()
+                val v = progress.coerceIn(50, 1000)
+                binding.tvIntervalValue.text = "${v}ms"
+                prefs.edit().putLong(FloatingButtonService.PREF_TAP_INTERVAL, v.toLong()).apply()
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
     }
 
+    // ─── Auto-Discover (mDNS) ─────────────────────────────────────────────────
+
     private fun startMdnsDiscovery() {
         stopDiscovery()
-        binding.tvDiscoveryStatus.text = "Cihaz aranıyor..."
+        discoveredPairIp = null; discoveredPairPort = null
+        discoveredConnectIp = null; discoveredConnectPort = null
+
+        binding.tvDiscoveryStatus.text = "🔍 Cihaz aranıyor..."
         binding.tvDiscoveryStatus.visibility = View.VISIBLE
 
-        val pair = WifiAdbHelper.startDiscovery(this, object : WifiAdbHelper.DiscoveryCallback {
+        val result = WifiAdbHelper.startDiscovery(this, object : WifiAdbHelper.DiscoveryCallback {
             override fun onPairingFound(ip: String, port: Int) {
                 runOnUiThread {
                     discoveredPairIp = ip
                     discoveredPairPort = port
-                    binding.tvDiscoveryStatus.text = "Eşleştirme servisi bulundu: $ip:$port"
-                    showPairDialog(ip, port)
+                    binding.tvDiscoveryStatus.text = "✓ Cihaz bulundu — $ip"
+                    // Show simple code-only dialog
+                    showCodeOnlyDialog(ip, port)
                 }
             }
 
@@ -134,125 +133,194 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     discoveredConnectIp = ip
                     discoveredConnectPort = port
-                    binding.tvDiscoveryStatus.text = "Bağlantı servisi bulundu: $ip:$port"
                 }
             }
 
             override fun onPairingLost() {
                 runOnUiThread {
-                    discoveredPairIp = null
-                    discoveredPairPort = null
-                    if (binding.tvDiscoveryStatus.text.toString().startsWith("Eşleştirme")) {
-                        binding.tvDiscoveryStatus.text = "Cihaz aranıyor..."
-                    }
+                    discoveredPairIp = null; discoveredPairPort = null
+                    if (binding.tvDiscoveryStatus.text.startsWith("✓").not())
+                        binding.tvDiscoveryStatus.text = "🔍 Cihaz aranıyor..."
                 }
             }
         })
-
-        nsdManager = pair.first
-        discoveryListeners = pair.second
+        nsdManager = result.first
+        discoveryListeners = result.second
     }
 
     private fun stopDiscovery() {
         val listeners = discoveryListeners ?: return
         val nm = nsdManager ?: return
-        listeners.forEach { listener ->
-            try { nm.stopServiceDiscovery(listener) } catch (_: Exception) {}
-        }
-        discoveryListeners = null
-        nsdManager = null
+        listeners.forEach { try { nm.stopServiceDiscovery(it) } catch (_: Exception) {} }
+        discoveryListeners = null; nsdManager = null
     }
 
-    private fun showPairDialog(ip: String = "", port: Int = 0) {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_pair, null)
-        val etIp = dialogView.findViewById<android.widget.EditText>(R.id.etPairIp)
-        val etPort = dialogView.findViewById<android.widget.EditText>(R.id.etPairPort)
-        val etCode = dialogView.findViewById<android.widget.EditText>(R.id.etPairCode)
-        val etConnectPort = dialogView.findViewById<android.widget.EditText>(R.id.etConnectPortAfterPair)
+    // ─── Simple Code-Only Dialog (after auto-discover) ───────────────────────
 
-        if (ip.isNotEmpty()) etIp.setText(ip)
-        if (port > 0) etPort.setText(port.toString())
-        // Pre-fill discovered connect port if available
-        if (discoveredConnectPort != null && discoveredConnectPort!! > 0) {
-            etConnectPort.setText(discoveredConnectPort.toString())
+    private fun showCodeOnlyDialog(pairIp: String, pairPort: Int) {
+        val etCode = EditText(this).apply {
+            hint = "867733"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            maxLines = 1
+            textSize = 22f
+            gravity = android.view.Gravity.CENTER
+            letterSpacing = 0.3f
+        }
+
+        val padding = (20 * resources.displayMetrics.density).toInt()
+        val container = android.widget.FrameLayout(this).apply {
+            setPadding(padding, padding / 2, padding, 0)
+            addView(etCode)
         }
 
         AlertDialog.Builder(this)
-            .setTitle("ADB Eşleştirme")
+            .setTitle("📱 Eşleştirme Kodu")
+            .setMessage("Wireless Debugging → Kod ile eşleştir ekranındaki 6 haneli kodu girin")
+            .setView(container)
+            .setPositiveButton("Bağlan") { _, _ ->
+                val code = etCode.text.toString().trim()
+                if (code.length < 6) {
+                    Toast.makeText(this, "6 haneli kodu girin!", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                doPairAndConnect(pairIp, pairPort, code)
+            }
+            .setNegativeButton("İptal", null)
+            .show()
+
+        // Auto-focus + keyboard
+        etCode.requestFocus()
+    }
+
+    // ─── Core pair + connect logic ────────────────────────────────────────────
+
+    private fun doPairAndConnect(pairIp: String, pairPort: Int, code: String) {
+        binding.progressBar.visibility = View.VISIBLE
+        binding.tvDiscoveryStatus.text = "⏳ Eşleştiriliyor..."
+
+        lifecycleScope.launch {
+            val pairOk = WifiAdbHelper.pair(this@MainActivity, pairIp, pairPort, code)
+
+            if (!pairOk) {
+                runOnUiThread {
+                    binding.progressBar.visibility = View.GONE
+                    binding.tvDiscoveryStatus.text = "✗ Eşleştirme başarısız"
+                    Toast.makeText(this@MainActivity, "Eşleştirme başarısız! Kodu kontrol edin.", Toast.LENGTH_LONG).show()
+                }
+                return@launch
+            }
+
+            // Pairing succeeded — now wait up to 5 seconds for connect port
+            runOnUiThread { binding.tvDiscoveryStatus.text = "✓ Eşleştirildi, bağlanıyor..." }
+
+            var connectIp = discoveredConnectIp ?: pairIp
+            var connectPort = discoveredConnectPort
+
+            if (connectPort == null) {
+                repeat(10) {
+                    if (discoveredConnectPort != null) return@repeat
+                    delay(500)
+                }
+                connectIp = discoveredConnectIp ?: pairIp
+                connectPort = discoveredConnectPort
+            }
+
+            if (connectPort == null) {
+                // Still no connect port — ask user
+                runOnUiThread {
+                    binding.progressBar.visibility = View.GONE
+                    binding.tvDiscoveryStatus.text = "✓ Eşleştirildi"
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Eşleştirme tamam! 'Manuel IP ile Bağlan' ile Wireless Debugging ana ekranındaki portu girin.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                return@launch
+            }
+
+            val connectOk = WifiAdbHelper.connect(this@MainActivity, connectIp, connectPort)
+            runOnUiThread {
+                binding.progressBar.visibility = View.GONE
+                if (connectOk) {
+                    updateConnectionStatus()
+                    binding.tvDiscoveryStatus.text = "✓ Bağlı — $connectIp"
+                    stopDiscovery()
+                    Toast.makeText(this@MainActivity, "Bağlantı başarılı! ✓", Toast.LENGTH_SHORT).show()
+                } else {
+                    binding.tvDiscoveryStatus.text = "✗ Bağlantı başarısız"
+                    Toast.makeText(this@MainActivity, "Eşleştirildi ama bağlantı kurulamadı. Manuel bağlantıyı deneyin.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    // ─── Full manual pair dialog ──────────────────────────────────────────────
+
+    private fun showFullPairDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_pair, null)
+        val etIp = dialogView.findViewById<EditText>(R.id.etPairIp)
+        val etPort = dialogView.findViewById<EditText>(R.id.etPairPort)
+        val etCode = dialogView.findViewById<EditText>(R.id.etPairCode)
+        val etConnectPort = dialogView.findViewById<EditText>(R.id.etConnectPortAfterPair)
+
+        // Pre-fill if we already discovered something
+        discoveredPairIp?.let { etIp.setText(it) }
+        discoveredPairPort?.let { etPort.setText(it.toString()) }
+        discoveredConnectPort?.let { etConnectPort.setText(it.toString()) }
+
+        AlertDialog.Builder(this)
+            .setTitle("🔑 Manuel Eşleştirme")
             .setView(dialogView)
             .setPositiveButton("Eşleştir") { _, _ ->
-                val pairIp = etIp.text.toString().trim()
-                val pairPort = etPort.text.toString().trim().toIntOrNull() ?: 0
+                val ip = etIp.text.toString().trim()
+                val pPort = etPort.text.toString().trim().toIntOrNull() ?: 0
                 val code = etCode.text.toString().trim()
-                val connectPortInput = etConnectPort.text.toString().trim().toIntOrNull()
+                val cPort = etConnectPort.text.toString().trim().toIntOrNull()
 
-                if (pairIp.isEmpty() || pairPort == 0 || code.isEmpty()) {
+                if (ip.isEmpty() || pPort == 0 || code.isEmpty()) {
                     Toast.makeText(this, "IP, eşleştirme portu ve kodu doldurun!", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
 
-                binding.progressBar.visibility = View.VISIBLE
-                lifecycleScope.launch {
-                    val pairOk = WifiAdbHelper.pair(this@MainActivity, pairIp, pairPort, code)
-                    if (pairOk) {
-                        // Use explicitly entered connect port, then discovered, otherwise fail with message
-                        val connectIp = discoveredConnectIp ?: pairIp
-                        val connectPort = connectPortInput
-                            ?: discoveredConnectPort
-                            ?: run {
-                                runOnUiThread {
-                                    binding.progressBar.visibility = View.GONE
-                                    Toast.makeText(
-                                        this@MainActivity,
-                                        "Eşleştirme başarılı! Bağlantı portu gerekli — Wireless Debugging ekranında görünen portu 'Manuel Bağlantı' ile deneyin.",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                                return@launch
-                            }
-                        val connectOk = WifiAdbHelper.connect(this@MainActivity, connectIp, connectPort)
-                        runOnUiThread {
-                            binding.progressBar.visibility = View.GONE
-                            if (connectOk) {
-                                updateConnectionStatus()
-                                Toast.makeText(this@MainActivity, "Bağlantı başarılı! ✓", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(this@MainActivity, "Eşleştirme OK ama bağlantı başarısız. Manuel Bağlantı'yı deneyin.", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    } else {
-                        runOnUiThread {
-                            binding.progressBar.visibility = View.GONE
-                            Toast.makeText(this@MainActivity, "Eşleştirme başarısız! Kodu ve portu kontrol edin.", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+                if (cPort != null) {
+                    discoveredConnectIp = ip
+                    discoveredConnectPort = cPort
                 }
+                doPairAndConnect(ip, pPort, code)
             }
             .setNegativeButton("İptal", null)
             .show()
     }
 
+    // ─── Manual connect dialog ────────────────────────────────────────────────
+
     private fun showManualConnectDialog() {
         val dialogView = layoutInflater.inflate(R.layout.dialog_connect, null)
-        val etIp = dialogView.findViewById<android.widget.EditText>(R.id.etConnectIp)
-        val etPort = dialogView.findViewById<android.widget.EditText>(R.id.etConnectPort)
-        etPort.setText("5555")
+        val etIp = dialogView.findViewById<EditText>(R.id.etConnectIp)
+        val etPort = dialogView.findViewById<EditText>(R.id.etConnectPort)
+
+        // Pre-fill discovered connect info
+        discoveredConnectIp?.let { etIp.setText(it) }
+        val prefPort = discoveredConnectPort ?: 0
+        etPort.setText(if (prefPort > 0) prefPort.toString() else "")
 
         AlertDialog.Builder(this)
-            .setTitle("Manuel Bağlantı")
+            .setTitle("📡 Manuel Bağlantı")
+            .setMessage("Wireless Debugging ana ekranındaki IP ve port")
             .setView(dialogView)
             .setPositiveButton("Bağlan") { _, _ ->
-                val connectIp = etIp.text.toString().trim()
-                val connectPort = etPort.text.toString().trim().toIntOrNull() ?: 5555
+                val ip = etIp.text.toString().trim()
+                val port = etPort.text.toString().trim().toIntOrNull() ?: 0
 
-                if (connectIp.isEmpty()) {
-                    Toast.makeText(this, "IP adresini girin!", Toast.LENGTH_SHORT).show()
+                if (ip.isEmpty() || port == 0) {
+                    Toast.makeText(this, "IP ve port girin!", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
 
                 binding.progressBar.visibility = View.VISIBLE
                 lifecycleScope.launch {
-                    val ok = WifiAdbHelper.connect(this@MainActivity, connectIp, connectPort)
+                    val ok = WifiAdbHelper.connect(this@MainActivity, ip, port)
                     runOnUiThread {
                         binding.progressBar.visibility = View.GONE
                         if (ok) {
@@ -268,12 +336,12 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    // ─── Status ───────────────────────────────────────────────────────────────
+
     private fun updateConnectionStatus() {
         val connected = WifiAdbHelper.isConnected(this)
         binding.tvConnectionStatus.text = if (connected) "✓ Bağlı" else "✗ Bağlı Değil"
-        binding.tvConnectionStatus.setTextColor(
-            if (connected) 0xFF4CAF50.toInt() else 0xFFF44336.toInt()
-        )
+        binding.tvConnectionStatus.setTextColor(if (connected) 0xFF4CAF50.toInt() else 0xFFF44336.toInt())
         binding.btnStartFloating.isEnabled = connected
         binding.btnDisconnect.isEnabled = connected
         binding.btnStartFloating.alpha = if (connected) 1f else 0.5f
@@ -282,8 +350,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateConnectionStatus()
-        val hasOverlay = Settings.canDrawOverlays(this)
-        binding.btnOverlayPermission.visibility = if (hasOverlay) View.GONE else View.VISIBLE
+        binding.btnOverlayPermission.visibility = if (Settings.canDrawOverlays(this)) View.GONE else View.VISIBLE
     }
 
     override fun onDestroy() {
