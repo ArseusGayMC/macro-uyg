@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121212">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- Header -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ADB Tap Button"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Wireless ADB üzerinden otomatik tap"
+            android:textSize="13sp"
+            android:textColor="#AAAAAA"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Overlay Permission -->
+        <Button
+            android:id="@+id/btnOverlayPermission"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⚠ Ekran Üstü Çizim İzni Ver"
+            android:backgroundTint="#FF9800"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Connection Status Card -->
+        <androidx.cardview.widget.CardView
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="#1E1E1E"
+            app:cardCornerRadius="12dp"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="BAĞLANTI DURUMU"
+                    android:textSize="11sp"
+                    android:textColor="#888888"
+                    android:letterSpacing="0.1"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/tvConnectionStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✗ Bağlı Değil"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#F44336" />
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Discovery -->
+        <androidx.cardview.widget.CardView
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="#1E1E1E"
+            app:cardCornerRadius="12dp"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="BAĞLANMA"
+                    android:textSize="11sp"
+                    android:textColor="#888888"
+                    android:letterSpacing="0.1"
+                    android:layout_marginBottom="12dp" />
+
+                <Button
+                    android:id="@+id/btnAutoDiscover"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🔍 Otomatik Cihaz Bul (mDNS)"
+                    android:backgroundTint="#2196F3"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/tvDiscoveryStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textColor="#AAAAAA"
+                    android:textSize="13sp"
+                    android:visibility="gone"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/btnPairConnect"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🔑 Eşleştirme Kodu ile Bağlan"
+                    android:backgroundTint="#9C27B0"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/btnManualConnect"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="📡 Manuel IP ile Bağlan"
+                    android:backgroundTint="#607D8B" />
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Button Settings -->
+        <androidx.cardview.widget.CardView
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="#1E1E1E"
+            app:cardCornerRadius="12dp"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="BUTON AYARLARI"
+                    android:textSize="11sp"
+                    android:textColor="#888888"
+                    android:letterSpacing="0.1"
+                    android:layout_marginBottom="16dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Buton Boyutu"
+                        android:textColor="#CCCCCC"
+                        android:textSize="14sp" />
+                    <TextView
+                        android:id="@+id/tvSizeValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="64dp"
+                        android:textColor="#2196F3"
+                        android:textSize="14sp"
+                        android:minWidth="50dp"
+                        android:gravity="end" />
+                </LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/seekBarSize"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="128"
+                    android:progress="64"
+                    android:layout_marginBottom="16dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Tap Aralığı"
+                        android:textColor="#CCCCCC"
+                        android:textSize="14sp" />
+                    <TextView
+                        android:id="@+id/tvIntervalValue"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="100ms"
+                        android:textColor="#2196F3"
+                        android:textSize="14sp"
+                        android:minWidth="60dp"
+                        android:gravity="end" />
+                </LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/seekBarInterval"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="1000"
+                    android:progress="100" />
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Control Buttons -->
+        <Button
+            android:id="@+id/btnStartFloating"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="▶  Yüzen Butonu Başlat"
+            android:textSize="16sp"
+            android:backgroundTint="#4CAF50"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btnStopFloating"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⏹  Yüzen Butonu Durdur"
+            android:backgroundTint="#FF5722"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btnDisconnect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Bağlantıyı Kes"
+            android:backgroundTint="#607D8B" />
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:visibility="gone"
+            android:layout_marginTop="16dp" />
+
+        <!-- Info -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ℹ️ Kullanım:\n1. Wireless Debugging'i telefonunuzda açın\n2. 'Otomatik Cihaz Bul' veya eşleştirme kodu ile bağlanın\n3. Yüzen butonu başlatın\n4. Butona basılı tutarak tap gönderin\n5. Butonu sürükleyerek yerini değiştirin"
+            android:textColor="#888888"
+            android:textSize="12sp"
+            android:layout_marginTop="16dp"
+            android:lineSpacingExtra="4dp" />
+
+    </LinearLayout>
+</ScrollView>

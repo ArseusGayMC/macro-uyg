@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Daha önce eşleştirilmiş cihaza doğrudan bağlanın"
+        android:textSize="12sp"
+        android:textColor="#888888"
+        android:layout_marginBottom="16dp" />
+
+    <android.widget.EditText
+        android:id="@+id/etConnectIp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="IP Adresi (örn: 192.168.1.5)"
+        android:inputType="text"
+        android:layout_marginBottom="8dp" />
+
+    <android.widget.EditText
+        android:id="@+id/etConnectPort"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Port (varsayılan: 5555)"
+        android:inputType="number"
+        android:text="5555" />
+
+</LinearLayout>

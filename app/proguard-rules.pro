@@ -1,0 +1,7 @@
+-keep class com.adbbutton.app.** { *; }
+-keep class io.github.muntashirakon.adb.** { *; }
+-keep class com.cgutman.adblib.** { *; }
+-keep class android.sun.** { *; }
+-dontwarn android.sun.**
+-dontwarn javax.annotation.**
+-dontwarn org.bouncycastle.**
