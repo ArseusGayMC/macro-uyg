@@ -7,7 +7,7 @@ material = "1.12.0"
 lifecycleService = "2.8.4"
 coroutines = "1.8.1"
 bcprov = "1.78.1"
-spake2Android = "1.0"
+spake2Android = "1.0.0"
 sunSecurityAndroid = "1.1"
 annotation = "1.8.2"
 
@@ -18,7 +18,7 @@ material = { group = "com.google.android.material", name = "material", version.r
 lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycleService" }
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 bcprov-jdk15to18 = { group = "org.bouncycastle", name = "bcprov-jdk15to18", version.ref = "bcprov" }
-spake2-android = { group = "com.github.Mahmud0808.spake2-java", name = "spake2-android", version.ref = "spake2Android" }
+spake2-android = { group = "com.github.MuntashirAkon.spake2-java", name = "spake2-android", version.ref = "spake2Android" }
 sun-security-android = { group = "com.github.MuntashirAkon", name = "sun-security-android", version.ref = "sunSecurityAndroid" }
 annotation = { group = "androidx.annotation", name = "annotation", version.ref = "annotation" }
 junit = { group = "junit", name = "junit", version = "4.13.2" }
