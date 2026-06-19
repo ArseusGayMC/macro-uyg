@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Debug APK
@@ -34,22 +37,21 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+      - name: Build APK
+        run: ./gradlew assembleRelease --no-daemon
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: AdbTapButton-APK
           path: app/build/outputs/apk/release/*.apk
-          retention-days: 30
+          retention-days: 90
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main'
         with:
           tag_name: build-${{ github.run_number }}
-          name: "ADB Tap Button v1.0 (Build ${{ github.run_number }})"
+          name: "ADB Tap Button (Build ${{ github.run_number }})"
           files: app/build/outputs/apk/release/*.apk
           generate_release_notes: false
         env:
