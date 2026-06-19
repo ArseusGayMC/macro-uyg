@@ -35,6 +35,22 @@
         android:layout_height="wrap_content"
         android:hint="6 Haneli Eşleştirme Kodu"
         android:inputType="number"
-        android:maxLength="6" />
+        android:maxLength="6"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Eşleştirme sonrası bağlantı portu (Wireless Debugging ana ekranındaki IP'nin yanındaki port):"
+        android:textSize="12sp"
+        android:textColor="#888888"
+        android:layout_marginBottom="4dp" />
+
+    <android.widget.EditText
+        android:id="@+id/etConnectPortAfterPair"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Bağlantı Portu (örn: 37561)"
+        android:inputType="number" />
 
 </LinearLayout>

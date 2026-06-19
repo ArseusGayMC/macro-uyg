@@ -168,9 +168,14 @@ class MainActivity : AppCompatActivity() {
         val etIp = dialogView.findViewById<android.widget.EditText>(R.id.etPairIp)
         val etPort = dialogView.findViewById<android.widget.EditText>(R.id.etPairPort)
         val etCode = dialogView.findViewById<android.widget.EditText>(R.id.etPairCode)
+        val etConnectPort = dialogView.findViewById<android.widget.EditText>(R.id.etConnectPortAfterPair)
 
         if (ip.isNotEmpty()) etIp.setText(ip)
         if (port > 0) etPort.setText(port.toString())
+        // Pre-fill discovered connect port if available
+        if (discoveredConnectPort != null && discoveredConnectPort!! > 0) {
+            etConnectPort.setText(discoveredConnectPort.toString())
+        }
 
         AlertDialog.Builder(this)
             .setTitle("ADB Eşleştirme")
@@ -179,9 +184,10 @@ class MainActivity : AppCompatActivity() {
                 val pairIp = etIp.text.toString().trim()
                 val pairPort = etPort.text.toString().trim().toIntOrNull() ?: 0
                 val code = etCode.text.toString().trim()
+                val connectPortInput = etConnectPort.text.toString().trim().toIntOrNull()
 
                 if (pairIp.isEmpty() || pairPort == 0 || code.isEmpty()) {
-                    Toast.makeText(this, "Tüm alanları doldurun!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "IP, eşleştirme portu ve kodu doldurun!", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
 
@@ -189,8 +195,21 @@ class MainActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     val pairOk = WifiAdbHelper.pair(this@MainActivity, pairIp, pairPort, code)
                     if (pairOk) {
+                        // Use explicitly entered connect port, then discovered, otherwise fail with message
                         val connectIp = discoveredConnectIp ?: pairIp
-                        val connectPort = discoveredConnectPort ?: 5555
+                        val connectPort = connectPortInput
+                            ?: discoveredConnectPort
+                            ?: run {
+                                runOnUiThread {
+                                    binding.progressBar.visibility = View.GONE
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "Eşleştirme başarılı! Bağlantı portu gerekli — Wireless Debugging ekranında görünen portu 'Manuel Bağlantı' ile deneyin.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                                return@launch
+                            }
                         val connectOk = WifiAdbHelper.connect(this@MainActivity, connectIp, connectPort)
                         runOnUiThread {
                             binding.progressBar.visibility = View.GONE
@@ -198,13 +217,13 @@ class MainActivity : AppCompatActivity() {
                                 updateConnectionStatus()
                                 Toast.makeText(this@MainActivity, "Bağlantı başarılı! ✓", Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(this@MainActivity, "Eşleştirme OK ama bağlantı başarısız", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this@MainActivity, "Eşleştirme OK ama bağlantı başarısız. Manuel Bağlantı'yı deneyin.", Toast.LENGTH_LONG).show()
                             }
                         }
                     } else {
                         runOnUiThread {
                             binding.progressBar.visibility = View.GONE
-                            Toast.makeText(this@MainActivity, "Eşleştirme başarısız! Kodu kontrol edin.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "Eşleştirme başarısız! Kodu ve portu kontrol edin.", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }

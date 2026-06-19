@@ -9,10 +9,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.concurrent.Executors
 
 object WifiAdbHelper {
 
     private const val TAG = "WifiAdbHelper"
+    private val tapExecutor = Executors.newSingleThreadExecutor()
     const val TLS_PAIRING = "_adb-tls-pairing._tcp"
     const val TLS_CONNECT = "_adb-tls-connect._tcp"
 
@@ -115,13 +117,15 @@ object WifiAdbHelper {
         }
 
     fun sendTap(context: Context, x: Int, y: Int) {
-        try {
-            val manager = AdbConnectionManager.getInstance(context)
-            if (!manager.isConnected) return
-            val stream = manager.openStream("shell:input tap $x $y")
-            stream.close()
-        } catch (e: Exception) {
-            Log.e(TAG, "Tap failed: ${e.message}")
+        tapExecutor.submit {
+            try {
+                val manager = AdbConnectionManager.getInstance(context)
+                if (!manager.isConnected) return@submit
+                val stream = manager.openStream("shell:input tap $x $y")
+                stream.close()
+            } catch (e: Exception) {
+                Log.e(TAG, "Tap failed: ${e.message}")
+            }
         }
     }
 
