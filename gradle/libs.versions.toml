@@ -18,6 +18,7 @@ material = { group = "com.google.android.material", name = "material", version.r
 lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycleService" }
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 bcprov-jdk15to18 = { group = "org.bouncycastle", name = "bcprov-jdk15to18", version.ref = "bcprov" }
+bcpkix-jdk15to18 = { group = "org.bouncycastle", name = "bcpkix-jdk15to18", version.ref = "bcprov" }
 spake2-android = { group = "com.github.MuntashirAkon.spake2-java", name = "spake2-android", version.ref = "spake2Android" }
 sun-security-android = { group = "com.github.MuntashirAkon", name = "sun-security-android", version.ref = "sunSecurityAndroid" }
 annotation = { group = "androidx.annotation", name = "annotation", version.ref = "annotation" }

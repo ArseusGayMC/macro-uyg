@@ -50,6 +50,7 @@ dependencies {
     implementation(libs.lifecycle.service)
     implementation(libs.coroutines.android)
     implementation(libs.bcprov.jdk15to18)
+    implementation(libs.bcpkix.jdk15to18)
     implementation(project(":libadb"))
     implementation(project(":adblib"))
 }
