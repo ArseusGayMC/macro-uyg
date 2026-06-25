@@ -49,7 +49,7 @@ dependencies {
     implementation(libs.material)
     implementation(libs.lifecycle.service)
     implementation(libs.coroutines.android)
-    implementation(libs.sun.security.android)
+    implementation(libs.bcprov.jdk15to18)
     implementation(project(":libadb"))
     implementation(project(":adblib"))
 }

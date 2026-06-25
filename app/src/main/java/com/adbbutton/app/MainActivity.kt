@@ -199,57 +199,55 @@ class MainActivity : AppCompatActivity() {
         binding.tvDiscoveryStatus.text = "⏳ Eşleştiriliyor..."
 
         lifecycleScope.launch {
-            val pairOk = WifiAdbHelper.pair(this@MainActivity, pairIp, pairPort, code)
+            val pairResult = WifiAdbHelper.pair(this@MainActivity, pairIp, pairPort, code)
 
-            if (!pairOk) {
+            if (!pairResult.success) {
                 runOnUiThread {
                     binding.progressBar.visibility = View.GONE
                     binding.tvDiscoveryStatus.text = "✗ Eşleştirme başarısız"
-                    Toast.makeText(this@MainActivity, "Eşleştirme başarısız! Kodu kontrol edin.", Toast.LENGTH_LONG).show()
-                }
-                return@launch
-            }
-
-            // Pairing succeeded — now wait up to 5 seconds for connect port
-            runOnUiThread { binding.tvDiscoveryStatus.text = "✓ Eşleştirildi, bağlanıyor..." }
-
-            var connectIp = discoveredConnectIp ?: pairIp
-            var connectPort = discoveredConnectPort
-
-            if (connectPort == null) {
-                repeat(10) {
-                    if (discoveredConnectPort != null) return@repeat
-                    delay(500)
-                }
-                connectIp = discoveredConnectIp ?: pairIp
-                connectPort = discoveredConnectPort
-            }
-
-            if (connectPort == null) {
-                // Still no connect port — ask user
-                runOnUiThread {
-                    binding.progressBar.visibility = View.GONE
-                    binding.tvDiscoveryStatus.text = "✓ Eşleştirildi"
                     Toast.makeText(
                         this@MainActivity,
-                        "Eşleştirme tamam! 'Manuel IP ile Bağlan' ile Wireless Debugging ana ekranındaki portu girin.",
+                        "Eşleştirme başarısız!\n${pairResult.error ?: "Bilinmeyen hata"}",
                         Toast.LENGTH_LONG
                     ).show()
                 }
                 return@launch
             }
 
-            val connectOk = WifiAdbHelper.connect(this@MainActivity, connectIp, connectPort)
+            // Pairing succeeded — wait up to 5 s for connect port from mDNS
+            runOnUiThread { binding.tvDiscoveryStatus.text = "✓ Eşleştirildi, bağlanıyor..." }
+
+            repeat(10) {
+                if (discoveredConnectPort != null) return@repeat
+                delay(500)
+            }
+
+            val connectIp = discoveredConnectIp ?: pairIp
+            val connectPort = discoveredConnectPort
+
+            val connectResult = if (connectPort != null) {
+                // Use the port we already discovered
+                WifiAdbHelper.connect(this@MainActivity, connectIp, connectPort)
+            } else {
+                // mDNS didn't give us the connect port — let the library discover it itself
+                runOnUiThread { binding.tvDiscoveryStatus.text = "🔍 Bağlantı portu aranıyor..." }
+                WifiAdbHelper.connectTls(this@MainActivity, 8000L)
+            }
+
             runOnUiThread {
                 binding.progressBar.visibility = View.GONE
-                if (connectOk) {
+                if (connectResult.success) {
                     updateConnectionStatus()
-                    binding.tvDiscoveryStatus.text = "✓ Bağlı — $connectIp"
+                    binding.tvDiscoveryStatus.text = "✓ Bağlı"
                     stopDiscovery()
                     Toast.makeText(this@MainActivity, "Bağlantı başarılı! ✓", Toast.LENGTH_SHORT).show()
                 } else {
-                    binding.tvDiscoveryStatus.text = "✗ Bağlantı başarısız"
-                    Toast.makeText(this@MainActivity, "Eşleştirildi ama bağlantı kurulamadı. Manuel bağlantıyı deneyin.", Toast.LENGTH_LONG).show()
+                    binding.tvDiscoveryStatus.text = "✗ Bağlantı kurulamadı"
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Eşleştirildi ama bağlanamadı:\n${connectResult.error ?: "?"}\n\nManuel IP ile Bağlan'ı deneyin.",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }
@@ -320,14 +318,18 @@ class MainActivity : AppCompatActivity() {
 
                 binding.progressBar.visibility = View.VISIBLE
                 lifecycleScope.launch {
-                    val ok = WifiAdbHelper.connect(this@MainActivity, ip, port)
+                    val result = WifiAdbHelper.connect(this@MainActivity, ip, port)
                     runOnUiThread {
                         binding.progressBar.visibility = View.GONE
-                        if (ok) {
+                        if (result.success) {
                             updateConnectionStatus()
                             Toast.makeText(this@MainActivity, "Bağlantı başarılı! ✓", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(this@MainActivity, "Bağlantı başarısız!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Bağlantı başarısız!\n${result.error ?: "?"}",
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
                     }
                 }
