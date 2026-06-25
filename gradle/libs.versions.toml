@@ -10,6 +10,7 @@ bcprov = "1.78.1"
 spake2Android = "2.2.1"
 sunSecurityAndroid = "1.1"
 annotation = "1.8.2"
+conscrypt = "2.5.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -22,6 +23,7 @@ bcpkix-jdk15to18 = { group = "org.bouncycastle", name = "bcpkix-jdk15to18", vers
 spake2-android = { group = "com.github.MuntashirAkon.spake2-java", name = "spake2-android", version.ref = "spake2Android" }
 sun-security-android = { group = "com.github.MuntashirAkon", name = "sun-security-android", version.ref = "sunSecurityAndroid" }
 annotation = { group = "androidx.annotation", name = "annotation", version.ref = "annotation" }
+conscrypt-android = { group = "org.conscrypt", name = "conscrypt-android", version.ref = "conscrypt" }
 junit = { group = "junit", name = "junit", version = "4.13.2" }
 
 [plugins]

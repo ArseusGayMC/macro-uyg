@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.bcprov.jdk15to18)
     implementation(libs.bcpkix.jdk15to18)
+    implementation(libs.conscrypt.android)
     implementation(project(":libadb"))
     implementation(project(":adblib"))
 }
