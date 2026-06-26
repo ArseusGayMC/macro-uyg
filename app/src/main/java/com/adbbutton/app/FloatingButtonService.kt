@@ -141,8 +141,13 @@ class FloatingButtonService : Service() {
                 isDragging  = false
 
                 if (isLocked) {
-                    // KİLİTLİ: basılı tut → oto-tap başlar
-                    handler.postDelayed({ if (!isDragging) startTapping() }, LONG_PRESS_THRESHOLD_MS)
+                    if (isTapping) {
+                        // Zaten taplıyor → dokunmak durduruyor (toggle)
+                        stopTapping()
+                    } else {
+                        // KİLİTLİ: 150ms basılı tut → tap başlar, parmak kalkınca devam eder
+                        handler.postDelayed({ if (!isDragging) startTapping() }, LONG_PRESS_THRESHOLD_MS)
+                    }
                 }
                 true
             }
@@ -159,25 +164,28 @@ class FloatingButtonService : Service() {
                         params.y = initialY + dy.toInt()
                         runCatching { windowManager.updateViewLayout(floatingView, params) }
                     }
-                } else {
-                    // KİLİTLİ: çok kayarsa long-press iptal et
+                } else if (!isTapping) {
+                    // KİLİTLİ (henüz tap başlamadı): çok kayarsa long-press iptal et
                     if (!isDragging && (Math.abs(dx) > 15 || Math.abs(dy) > 15)) {
                         isDragging = true
                         handler.removeCallbacksAndMessages(null)
-                        if (isTapping) stopTapping()
                     }
                 }
                 true
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                WifiAdbHelper.tapping = false          // executor'daki bekleyenler iptal
-                handler.removeCallbacksAndMessages(null)
-                if (isTapping) stopTapping()
-
-                if (!isLocked && isDragging) {
-                    prefs.edit().putInt(PREF_X, params.x).putInt(PREF_Y, params.y).apply()
+                if (!isLocked) {
+                    // Serbest modda sürükleme bitti → konumu kaydet
+                    if (isDragging) {
+                        prefs.edit().putInt(PREF_X, params.x).putInt(PREF_Y, params.y).apply()
+                    }
+                } else if (!isTapping) {
+                    // Long press tetiklenmeden parmak kalktı → iptal
+                    handler.removeCallbacksAndMessages(null)
                 }
+                // isTapping = true ise → parmak kalksa bile tap DEVAM EDER
+                // Durdurmak için tekrar dokunmak gerek (yukarıdaki ACTION_DOWN toggle)
                 true
             }
 
