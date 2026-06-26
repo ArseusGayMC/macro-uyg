@@ -44,6 +44,11 @@ class FloatingButtonService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
 
+        // Renk sabitleri
+        private const val COLOR_IDLE  = "#CC2196F3"  // mavi
+        private const val COLOR_RED   = "#CCF44336"  // kırmızı
+        private const val COLOR_GREEN = "#CC4CAF50"  // yeşil
+
         @Volatile var isRunning = false
             private set
     }
@@ -285,12 +290,6 @@ class FloatingButtonService : Service() {
     }
 
     // ─── Renkler & Drawable'lar ───────────────────────────────────────────────
-
-    companion object {
-        private const val COLOR_IDLE  = "#CC2196F3"  // mavi
-        private const val COLOR_RED   = "#CCF44336"  // kırmızı
-        private const val COLOR_GREEN = "#CC4CAF50"  // yeşil
-    }
 
     private fun circleDrawable(colorHex: String) =
         android.graphics.drawable.GradientDrawable().apply {
