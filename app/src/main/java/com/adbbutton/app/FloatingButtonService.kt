@@ -123,7 +123,7 @@ class FloatingButtonService : Service() {
     }
 
     private fun handleTouch(event: MotionEvent): Boolean {
-        when (event.action) {
+        return when (event.action) {
 
             MotionEvent.ACTION_DOWN -> {
                 initialX    = params.x
