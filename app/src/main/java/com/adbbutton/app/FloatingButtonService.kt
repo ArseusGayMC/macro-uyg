@@ -141,13 +141,11 @@ class FloatingButtonService : Service() {
                 isDragging  = false
 
                 if (isLocked) {
-                    if (isTapping) {
-                        // Zaten taplıyor → dokunmak durduruyor (toggle)
-                        stopTapping()
-                    } else {
-                        // KİLİTLİ: 150ms basılı tut → tap başlar, parmak kalkınca devam eder
-                        handler.postDelayed({ if (!isDragging) startTapping() }, LONG_PRESS_THRESHOLD_MS)
-                    }
+                    // KİLİTLİ: 150ms basılı tut → tap başlar
+                    // startTapping() FLAG_NOT_TOUCHABLE ekler; böylece ADB taplar
+                    // ve diğer parmaklar arka plan uygulamaya geçer.
+                    // Mevcut touch sequence (bu parmağın ACTION_UP'ı) yine overlay'e gelir.
+                    handler.postDelayed({ if (!isDragging) startTapping() }, LONG_PRESS_THRESHOLD_MS)
                 }
                 true
             }
@@ -157,35 +155,32 @@ class FloatingButtonService : Service() {
                 val dy = event.rawY - touchStartY
 
                 if (!isLocked) {
-                    // SERBEST: sürükleme aktif
+                    // SERBEST: sürükleme modu
                     if (!isDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) isDragging = true
                     if (isDragging) {
                         params.x = initialX + dx.toInt()
                         params.y = initialY + dy.toInt()
                         runCatching { windowManager.updateViewLayout(floatingView, params) }
                     }
-                } else if (!isTapping) {
-                    // KİLİTLİ (henüz tap başlamadı): çok kayarsa long-press iptal et
+                } else {
+                    // KİLİTLİ: çok kaydıysa long-press iptal
                     if (!isDragging && (Math.abs(dx) > 15 || Math.abs(dy) > 15)) {
                         isDragging = true
                         handler.removeCallbacksAndMessages(null)
+                        if (isTapping) stopTapping()
                     }
                 }
                 true
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (!isLocked) {
-                    // Serbest modda sürükleme bitti → konumu kaydet
-                    if (isDragging) {
-                        prefs.edit().putInt(PREF_X, params.x).putInt(PREF_Y, params.y).apply()
-                    }
-                } else if (!isTapping) {
-                    // Long press tetiklenmeden parmak kalktı → iptal
-                    handler.removeCallbacksAndMessages(null)
+                handler.removeCallbacksAndMessages(null)
+                // Parmak kalktı → tap durur (hold-to-tap modeli)
+                if (isTapping) stopTapping()
+
+                if (!isLocked && isDragging) {
+                    prefs.edit().putInt(PREF_X, params.x).putInt(PREF_Y, params.y).apply()
                 }
-                // isTapping = true ise → parmak kalksa bile tap DEVAM EDER
-                // Durdurmak için tekrar dokunmak gerek (yukarıdaki ACTION_DOWN toggle)
                 true
             }
 
