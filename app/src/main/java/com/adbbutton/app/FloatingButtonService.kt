@@ -35,10 +35,14 @@ class FloatingButtonService : Service() {
         const val CHANNEL_ID = "floating_button_channel"
         const val NOTIF_ID   = 1001
 
-        private const val DEFAULT_SIZE_DP        = 64
+        private const val DEFAULT_SIZE_DP         = 64
         private const val DEFAULT_TAP_INTERVAL_MS = 100L
-        // 150ms = parmak tutunca hemen tıklamaya başlar, yeterince hızlı
         private const val LONG_PRESS_THRESHOLD_MS = 150L
+
+        // Temel flag seti — FLAG_NOT_TOUCHABLE OLMADAN başlıyoruz
+        private const val BASE_FLAGS =
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
 
         @Volatile var isRunning = false
             private set
@@ -52,18 +56,21 @@ class FloatingButtonService : Service() {
     private val handler = Handler(Looper.getMainLooper())
 
     private var tapRunnable: Runnable? = null
-    private var isTapping = false
+    private var isTapping  = false
+    private var flashToggle = false
 
     // Hareket kilidi: true = kilitli (tap modu), false = açık (sürükleme modu)
     private var isLocked = true
 
-    private var initialX   = 0
-    private var initialY   = 0
+    private var initialX    = 0
+    private var initialY    = 0
     private var touchStartX = 0f
     private var touchStartY = 0f
     private var isDragging  = false
 
     private lateinit var params: WindowManager.LayoutParams
+
+    // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
@@ -98,29 +105,25 @@ class FloatingButtonService : Service() {
     private fun showFloatingButton() {
         val sizeDp = prefs.getInt(PREF_SIZE, DEFAULT_SIZE_DP)
         val sizePx = dpToPx(sizeDp)
-        val savedX  = prefs.getInt(PREF_X, 100)
-        val savedY  = prefs.getInt(PREF_Y, 300)
 
         floatingView = buildView(sizePx)
 
         params = WindowManager.LayoutParams(
             sizePx, sizePx,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            BASE_FLAGS,   // Başta dokunulabilir (FLAG_NOT_TOUCHABLE yok)
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = savedX; y = savedY
+            x = prefs.getInt(PREF_X, 100)
+            y = prefs.getInt(PREF_Y, 300)
         }
 
-        // Touch listener — ana daireye uygulanan (lock butonu kendi listener'ını tüketir)
-        floatingView.setOnTouchListener { _, event ->
-            handleTouch(event)
-        }
-
+        floatingView.setOnTouchListener { _, event -> handleTouch(event) }
         runCatching { windowManager.addView(floatingView, params) }
     }
+
+    // ─── Touch işleme ────────────────────────────────────────────────────────
 
     private fun handleTouch(event: MotionEvent): Boolean {
         return when (event.action) {
@@ -134,9 +137,7 @@ class FloatingButtonService : Service() {
 
                 if (isLocked) {
                     // KİLİTLİ: basılı tut → oto-tap başlar
-                    handler.postDelayed({
-                        if (!isDragging) startTapping()
-                    }, LONG_PRESS_THRESHOLD_MS)
+                    handler.postDelayed({ if (!isDragging) startTapping() }, LONG_PRESS_THRESHOLD_MS)
                 }
                 true
             }
@@ -147,16 +148,14 @@ class FloatingButtonService : Service() {
 
                 if (!isLocked) {
                     // SERBEST: sürükleme aktif
-                    if (!isDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
-                        isDragging = true
-                    }
+                    if (!isDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) isDragging = true
                     if (isDragging) {
                         params.x = initialX + dx.toInt()
                         params.y = initialY + dy.toInt()
                         runCatching { windowManager.updateViewLayout(floatingView, params) }
                     }
                 } else {
-                    // KİLİTLİ: küçük kayma varsa long-press iptal et
+                    // KİLİTLİ: çok kayarsa long-press iptal et
                     if (!isDragging && (Math.abs(dx) > 15 || Math.abs(dy) > 15)) {
                         isDragging = true
                         handler.removeCallbacksAndMessages(null)
@@ -167,16 +166,12 @@ class FloatingButtonService : Service() {
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // Parmak kalkınca anında durdur — executor'daki bekleyenler da iptal
-                WifiAdbHelper.tapping = false
+                WifiAdbHelper.tapping = false          // executor'daki bekleyenler iptal
                 handler.removeCallbacksAndMessages(null)
                 if (isTapping) stopTapping()
 
                 if (!isLocked && isDragging) {
-                    prefs.edit()
-                        .putInt(PREF_X, params.x)
-                        .putInt(PREF_Y, params.y)
-                        .apply()
+                    prefs.edit().putInt(PREF_X, params.x).putInt(PREF_Y, params.y).apply()
                 }
                 true
             }
@@ -192,11 +187,11 @@ class FloatingButtonService : Service() {
 
         // Ana TAP dairesi
         mainButton = TextView(this).apply {
-            text   = "TAP"
+            text     = "TAP"
             textSize = 11f
             setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            background = tapButtonBackground(false)
+            gravity  = Gravity.CENTER
+            background = circleDrawable(COLOR_IDLE)
         }
         frame.addView(mainButton, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -206,22 +201,20 @@ class FloatingButtonService : Service() {
         // Küçük kilit toggle — sağ üst köşede
         val lockPx = dpToPx(22)
         lockBtn = TextView(this).apply {
-            text     = lockIcon(isLocked)
-            textSize = 10f
+            text      = lockIcon(isLocked)
+            textSize  = 10f
             setTextColor(Color.WHITE)
-            gravity  = Gravity.CENTER
-            background = lockBackground(isLocked)
-            isClickable  = true
-            isFocusable  = true
+            gravity   = Gravity.CENTER
+            background = lockDrawable(isLocked)
+            isClickable = true
+            isFocusable = true
             setOnClickListener { toggleLock() }
         }
-        val lp = FrameLayout.LayoutParams(lockPx, lockPx).apply {
-            gravity = Gravity.TOP or Gravity.END
-            // üst ve sağdan biraz içeri
-            topMargin  = dpToPx(2)
+        frame.addView(lockBtn, FrameLayout.LayoutParams(lockPx, lockPx).apply {
+            gravity     = Gravity.TOP or Gravity.END
+            topMargin   = dpToPx(2)
             rightMargin = dpToPx(2)
-        }
-        frame.addView(lockBtn, lp)
+        })
 
         return frame
     }
@@ -232,35 +225,36 @@ class FloatingButtonService : Service() {
         isLocked = !isLocked
         prefs.edit().putBoolean(PREF_LOCKED, isLocked).apply()
         lockBtn.text       = lockIcon(isLocked)
-        lockBtn.background = lockBackground(isLocked)
-
+        lockBtn.background = lockDrawable(isLocked)
         if (!isLocked && isTapping) stopTapping()
-        // Renk sıfırla
-        mainButton.background = tapButtonBackground(isTapping)
+        mainButton.background = circleDrawable(COLOR_IDLE)
     }
 
     private fun lockIcon(locked: Boolean) = if (locked) "🔒" else "🔓"
-
-    private fun lockBackground(locked: Boolean) =
-        android.graphics.drawable.GradientDrawable().apply {
-            shape    = android.graphics.drawable.GradientDrawable.OVAL
-            // kilitli=turuncu, serbest=yeşil
-            setColor(Color.parseColor(if (locked) "#DD795548" else "#DD2E7D32"))
-            setStroke(2, Color.parseColor("#88FFFFFF"))
-        }
 
     // ─── Tapping ─────────────────────────────────────────────────────────────
 
     private fun startTapping() {
         if (isTapping) return
-        isTapping = true
+        isTapping   = true
+        flashToggle = false
         WifiAdbHelper.tapping = true
-        mainButton.background = tapButtonBackground(true)
+
+        // ANA FİX: overlay'i dokunulamaz yap → ADB input tap altta kalan uygulamaya gider
+        // Overlay touchable kalırsa kendi gönderdiği tap'ı kendisi alır ve tapRunnable'ı iptal eder
+        params.flags = BASE_FLAGS or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        runCatching { windowManager.updateViewLayout(floatingView, params) }
+
+        mainButton.background = circleDrawable(COLOR_RED)
 
         val interval = prefs.getLong(PREF_TAP_INTERVAL, DEFAULT_TAP_INTERVAL_MS)
+
         tapRunnable = object : Runnable {
             override fun run() {
                 if (!isTapping) return
+                // Yeşil-kırmızı flash — her tap'ta renk değişir
+                flashToggle = !flashToggle
+                mainButton.background = circleDrawable(if (flashToggle) COLOR_GREEN else COLOR_RED)
                 sendTap()
                 handler.postDelayed(this, interval)
             }
@@ -273,12 +267,16 @@ class FloatingButtonService : Service() {
         WifiAdbHelper.tapping = false
         tapRunnable?.let { handler.removeCallbacks(it) }
         tapRunnable = null
-        if (::mainButton.isInitialized) mainButton.background = tapButtonBackground(false)
+
+        // FLAG_NOT_TOUCHABLE kaldır → overlay tekrar dokunulabilir
+        params.flags = BASE_FLAGS
+        runCatching { windowManager.updateViewLayout(floatingView, params) }
+
+        if (::mainButton.isInitialized) mainButton.background = circleDrawable(COLOR_IDLE)
     }
 
     private fun sendTap() {
         // getLocationOnScreen → gerçek piksel koordinatları (status bar dahil)
-        // params.width/height → görünür boyut (floatingView.width ilk çağrıda 0 olabilir)
         val loc = IntArray(2)
         floatingView.getLocationOnScreen(loc)
         val x = loc[0] + (params.width / 2)
@@ -286,20 +284,34 @@ class FloatingButtonService : Service() {
         Thread { WifiAdbHelper.sendTap(applicationContext, x, y) }.start()
     }
 
-    // ─── Drawable yardımcıları ────────────────────────────────────────────────
+    // ─── Renkler & Drawable'lar ───────────────────────────────────────────────
 
-    private fun tapButtonBackground(active: Boolean) =
+    companion object {
+        private const val COLOR_IDLE  = "#CC2196F3"  // mavi
+        private const val COLOR_RED   = "#CCF44336"  // kırmızı
+        private const val COLOR_GREEN = "#CC4CAF50"  // yeşil
+    }
+
+    private fun circleDrawable(colorHex: String) =
         android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.OVAL
-            setColor(Color.parseColor(if (active) "#CCF44336" else "#CC2196F3"))
+            setColor(Color.parseColor(colorHex))
             setStroke(4, Color.WHITE)
+        }
+
+    private fun lockDrawable(locked: Boolean) =
+        android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(Color.parseColor(if (locked) "#DD795548" else "#DD2E7D32"))
+            setStroke(2, Color.parseColor("#88FFFFFF"))
         }
 
     // ─── Bildirim ─────────────────────────────────────────────────────────────
 
     private fun buildNotification(): Notification {
-        val stopIntent = Intent(this, FloatingButtonService::class.java).apply { action = ACTION_STOP }
-        val stopPI = PendingIntent.getService(this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+        val stopPI = PendingIntent.getService(this, 0,
+            Intent(this, FloatingButtonService::class.java).apply { action = ACTION_STOP },
+            PendingIntent.FLAG_IMMUTABLE)
         val openPI = PendingIntent.getActivity(this, 1,
             Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
 
