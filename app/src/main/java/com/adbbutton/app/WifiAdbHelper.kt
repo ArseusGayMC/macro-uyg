@@ -11,7 +11,21 @@ import java.util.concurrent.Executors
 object WifiAdbHelper {
 
     private const val TAG = "WifiAdbHelper"
+
+    /**
+     * Single-thread executor for tap commands.
+     * Each tap drains the ADB stream (waits for `input tap` to actually finish)
+     * before returning, so taps are sequential and never cut short.
+     */
     private val tapExecutor = Executors.newSingleThreadExecutor()
+
+    /**
+     * Set true while the button is held, false the instant the finger lifts.
+     * Checked inside the executor so queued-but-stale taps are discarded.
+     */
+    @Volatile
+    var tapping = false
+
     const val TLS_PAIRING = "_adb-tls-pairing._tcp"
     const val TLS_CONNECT = "_adb-tls-connect._tcp"
 
@@ -21,7 +35,6 @@ object WifiAdbHelper {
         fun onPairingLost()
     }
 
-    /** Result from pair/connect — carries success flag + human-readable error. */
     data class AdbResult(val success: Boolean, val error: String? = null)
 
     fun startDiscovery(context: Context, callback: DiscoveryCallback): Pair<NsdManager, List<NsdManager.DiscoveryListener>> {
@@ -71,11 +84,9 @@ object WifiAdbHelper {
 
         nsdManager.discoverServices(TLS_PAIRING, NsdManager.PROTOCOL_DNS_SD, pairingListener)
         nsdManager.discoverServices(TLS_CONNECT, NsdManager.PROTOCOL_DNS_SD, connectListener)
-
         return Pair(nsdManager, listOf(pairingListener, connectListener))
     }
 
-    /** Pair with a device. Returns AdbResult — check .error for failure details. */
     suspend fun pair(context: Context, ip: String, port: Int, code: String): AdbResult =
         withContext(Dispatchers.IO) {
             try {
@@ -91,7 +102,6 @@ object WifiAdbHelper {
             }
         }
 
-    /** Connect to a known ip:port. Returns AdbResult. */
     suspend fun connect(context: Context, ip: String, port: Int): AdbResult =
         withContext(Dispatchers.IO) {
             try {
@@ -107,7 +117,6 @@ object WifiAdbHelper {
             }
         }
 
-    /** Connect via mDNS auto-discovery — use when connect port is unknown after pairing. */
     suspend fun connectTls(context: Context, timeoutMs: Long = 8000L): AdbResult =
         withContext(Dispatchers.IO) {
             try {
@@ -123,15 +132,39 @@ object WifiAdbHelper {
             }
         }
 
+    /**
+     * Send an ADB tap at the given screen coordinates.
+     *
+     * FIX 1: Check [tapping] before submitting — if the finger was already lifted,
+     *         discard this tap immediately without touching the ADB connection.
+     *
+     * FIX 2: Drain the AdbInputStream until the daemon closes it.
+     *         Without this, stream.close() sends CLSE and the daemon kills
+     *         `input tap` before it actually executes on the remote screen.
+     */
     fun sendTap(context: Context, x: Int, y: Int) {
+        if (!tapping) return
         tapExecutor.submit {
+            if (!tapping) return@submit
             try {
                 val manager = AdbConnectionManager.getInstance(context)
-                if (!manager.isConnected) return@submit
+                if (!manager.isConnected) {
+                    Log.w(TAG, "sendTap: not connected")
+                    return@submit
+                }
                 val stream = manager.openStream("shell:input tap $x $y")
-                stream.close()
+                val input = stream.openInputStream()
+                try {
+                    val buf = ByteArray(256)
+                    @Suppress("ControlFlowWithEmptyBody")
+                    while (input.read(buf) != -1) {}
+                } catch (_: Exception) {
+                    // "Stream closed" = input tap finished normally
+                }
+                runCatching { stream.close() }
+                Log.v(TAG, "tap($x,$y) sent")
             } catch (e: Exception) {
-                Log.e(TAG, "Tap failed: ${e.message}")
+                Log.e(TAG, "sendTap failed: ${e.message}")
             }
         }
     }
@@ -141,6 +174,7 @@ object WifiAdbHelper {
     } catch (_: Exception) { false }
 
     fun disconnect(context: Context) {
+        tapping = false
         AdbConnectionManager.resetInstance()
     }
 
