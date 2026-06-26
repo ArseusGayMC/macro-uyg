@@ -36,7 +36,9 @@ class FloatingButtonService : Service() {
 
         private const val DEFAULT_SIZE_DP = 64
         private const val DEFAULT_TAP_INTERVAL_MS = 100L
-        private const val LONG_PRESS_THRESHOLD_MS = 300L
+
+        // FIX 3: 300ms → 150ms — butona basıldığı an hızlıca tıklamaya başlar
+        private const val LONG_PRESS_THRESHOLD_MS = 150L
 
         @Volatile
         var isRunning = false
@@ -116,7 +118,7 @@ class FloatingButtonService : Service() {
             y = savedY
         }
 
-        floatingView.setOnTouchListener { view, event ->
+        floatingView.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
@@ -156,6 +158,10 @@ class FloatingButtonService : Service() {
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    // FIX 1 (parmak kaldırınca tap): WifiAdbHelper.tapping'i ÖNCE false yap
+                    // böylece executor'daki bekleyen taplar anında iptal olur
+                    WifiAdbHelper.tapping = false
+
                     handler.removeCallbacksAndMessages(null)
 
                     if (isTapping) {
@@ -209,6 +215,11 @@ class FloatingButtonService : Service() {
     private fun startTapping() {
         if (isTapping) return
         isTapping = true
+
+        // FIX 2 (ana hata — tap hiç gitmiyordu): WifiAdbHelper.tapping'i true yap
+        // Olmadan sendTap executor'ı her tap'ı anında "discard" ediyordu
+        WifiAdbHelper.tapping = true
+
         updateButtonColor(true)
 
         val interval = prefs.getLong(PREF_TAP_INTERVAL, DEFAULT_TAP_INTERVAL_MS)
@@ -225,14 +236,25 @@ class FloatingButtonService : Service() {
 
     private fun stopTapping() {
         isTapping = false
+
+        // FIX 1 (devam): executor'daki son kuyruktaki tapları da durdur
+        WifiAdbHelper.tapping = false
+
         tapRunnable?.let { handler.removeCallbacks(it) }
         tapRunnable = null
         updateButtonColor(false)
     }
 
     private fun sendTap() {
-        val x = params.x + (floatingView.width / 2)
-        val y = params.y + (floatingView.height / 2)
+        // FIX 4 (koordinat hatası): getLocationOnScreen() ile gerçek ekran
+        // koordinatını al — params.x/y bazı cihazlarda status bar offsetini
+        // yanlış hesaplıyor, getLocationOnScreen her zaman doğru değeri verir.
+        // params.width kullan (floatingView.width ilk çağrıda 0 dönebilir).
+        val loc = IntArray(2)
+        floatingView.getLocationOnScreen(loc)
+        val x = loc[0] + (params.width / 2)
+        val y = loc[1] + (params.height / 2)
+
         Thread {
             WifiAdbHelper.sendTap(applicationContext, x, y)
         }.start()
