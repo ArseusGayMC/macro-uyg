@@ -21,84 +21,92 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 
+/**
+ * İki overlay mimarisi:
+ *
+ * 1. HEDEF NOKTA (targetView) — kırmızı ⊕, oyun butonunun üzerine sürüklenir.
+ *    Tapping sırasında FLAG_NOT_TOUCHABLE → ADB taplar oyuna geçer.
+ *    Tapping dışında sürüklenebilir (🔓 modunda).
+ *
+ * 2. TUT BUTONU (holdView) — mavi ●, kullanıcının parmağını koyduğu yer.
+ *    HER ZAMAN touchable → ACTION_DOWN = başla, ACTION_UP = dur.
+ *    FLAG_NOT_TOUCHABLE ASLA eklenmez.
+ */
 class FloatingButtonService : Service() {
 
     companion object {
-        const val ACTION_START = "com.adbbutton.app.ACTION_START"
-        const val ACTION_STOP  = "com.adbbutton.app.ACTION_STOP"
-        const val PREF_NAME         = "FloatingButtonPrefs"
-        const val PREF_X            = "button_x"
-        const val PREF_Y            = "button_y"
-        const val PREF_SIZE         = "button_size"
-        const val PREF_TAP_INTERVAL = "tap_interval"
-        const val PREF_LOCKED       = "movement_locked"
+        const val ACTION_STOP = "com.adbbutton.app.ACTION_STOP"
+        const val PREF_NAME      = "FloatingButtonPrefs"
+        const val PREF_HOLD_X   = "hold_x"
+        const val PREF_HOLD_Y   = "hold_y"
+        const val PREF_TARGET_X = "target_x"
+        const val PREF_TARGET_Y = "target_y"
+        const val PREF_SIZE          = "button_size"
+        const val PREF_TAP_INTERVAL  = "tap_interval"
         const val CHANNEL_ID = "floating_button_channel"
         const val NOTIF_ID   = 1001
 
         private const val DEFAULT_SIZE_DP         = 64
         private const val DEFAULT_TAP_INTERVAL_MS = 100L
-        private const val LONG_PRESS_THRESHOLD_MS = 150L
+        private const val LONG_PRESS_MS           = 150L
 
-        // Tapping başlarken buton bu konuma taşınır (stop butonu olur)
-        private const val STOP_X_DP = 8
-        private const val STOP_Y_DP = 8
+        // Renkler
+        private const val COL_HOLD_IDLE   = "#CC2196F3"  // mavi
+        private const val COL_HOLD_ACTIVE = "#CC4CAF50"  // yeşil (tapping)
+        private const val COL_TARGET_IDLE = "#CCF44336"  // kırmızı
+        private const val COL_TARGET_TAP  = "#CCFF9800"  // turuncu flash (tapping)
+        private const val COL_LOCK_ON     = "#DD795548"  // kahve (kilitli)
+        private const val COL_LOCK_OFF    = "#DD1565C0"  // koyu mavi (serbest)
 
-        private const val COLOR_IDLE  = "#CC2196F3"
-        private const val COLOR_RED   = "#CCF44336"
-        private const val COLOR_GREEN = "#CC4CAF50"
-        private const val COLOR_STOP  = "#CC9C27B0"  // mor = stop modu
-
-        // Temel flag: overlay yeni dokunuşlara kapalı değil başlangıçta
-        private const val BASE_FLAGS =
+        // Her iki overlay için ortak window flags (FLAG_NOT_TOUCHABLE YOK)
+        private val BASE_FLAGS =
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
 
-        @Volatile var isRunning = false
-            private set
+        @Volatile var isRunning = false; private set
     }
 
-    private lateinit var windowManager: WindowManager
-    private lateinit var floatingView: FrameLayout
-    private lateinit var mainButton: TextView
-    private lateinit var lockBtn: TextView
+    // ─── Sistem servisleri ────────────────────────────────────────────────────
+    private lateinit var wm: WindowManager
     private lateinit var prefs: SharedPreferences
     private val handler = Handler(Looper.getMainLooper())
 
-    private var tapRunnable: Runnable? = null
-    private var isTapping   = false
+    // ─── TUT butonu ───────────────────────────────────────────────────────────
+    private lateinit var holdView: FrameLayout
+    private lateinit var holdBtn: TextView
+    private lateinit var holdLockBtn: TextView
+    private lateinit var holdParams: WindowManager.LayoutParams
+    private var holdLocked = true          // true = sürükleme kapalı (hold modu)
+    private var holdInitX = 0; private var holdInitY = 0
+    private var holdTouchX = 0f; private var holdTouchY = 0f
+    private var holdDragging = false
+
+    // ─── HEDEF nokta ─────────────────────────────────────────────────────────
+    private lateinit var targetView: TextView
+    private lateinit var targetParams: WindowManager.LayoutParams
+    private var targetLocked = true        // true = sürükleme kapalı (ADB pass-through)
+    private var tgtInitX = 0; private var tgtInitY = 0
+    private var tgtTouchX = 0f; private var tgtTouchY = 0f
+    private var tgtDragging = false
     private var flashToggle = false
 
-    // Tapping öncesindeki gerçek buton konumu (stop sonrası buraya döner)
-    private var savedX = 100
-    private var savedY = 300
-
-    // Gerçek tap hedefi (piksel) — buton oyun alanındayken hesaplanır
-    private var tapTargetX = 0
-    private var tapTargetY = 0
-
-    private var isLocked    = true
-    private var initialX    = 0
-    private var initialY    = 0
-    private var touchStartX = 0f
-    private var touchStartY = 0f
-    private var isDragging  = false
-
-    private lateinit var params: WindowManager.LayoutParams
+    // ─── Tapping durumu ───────────────────────────────────────────────────────
+    @Volatile private var isTapping = false
+    private var tapRunnable: Runnable? = null
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        isLocked = prefs.getBoolean(PREF_LOCKED, true)
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        wm = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) { stopSelf(); return START_NOT_STICKY }
         startForeground(NOTIF_ID, buildNotification())
-        showFloatingButton()
+        showOverlays()
         isRunning = true
         return START_STICKY
     }
@@ -108,177 +116,193 @@ class FloatingButtonService : Service() {
     override fun onDestroy() {
         isRunning = false
         stopTapping()
-        if (::floatingView.isInitialized)
-            runCatching { windowManager.removeView(floatingView) }
+        runCatching { wm.removeView(holdView) }
+        runCatching { wm.removeView(targetView) }
         super.onDestroy()
     }
 
-    private fun dpToPx(dp: Int) = (dp * resources.displayMetrics.density).toInt()
+    private fun px(dp: Int) = (dp * resources.displayMetrics.density).toInt()
 
-    // ─── Floating button ──────────────────────────────────────────────────────
+    // ─── Overlays ─────────────────────────────────────────────────────────────
 
-    private fun showFloatingButton() {
-        val sizeDp = prefs.getInt(PREF_SIZE, DEFAULT_SIZE_DP)
-        val sizePx = dpToPx(sizeDp)
+    private fun showOverlays() {
+        val sz = px(prefs.getInt(PREF_SIZE, DEFAULT_SIZE_DP))
+        buildHoldView(sz)
+        buildTargetView(sz)
+    }
 
-        floatingView = buildView(sizePx)
+    // ── TUT Butonu ────────────────────────────────────────────────────────────
 
-        params = WindowManager.LayoutParams(
-            sizePx, sizePx,
+    private fun buildHoldView(sz: Int) {
+        holdView = FrameLayout(this)
+
+        holdBtn = TextView(this).apply {
+            text     = "TUT"
+            textSize = 10f
+            setTextColor(Color.WHITE)
+            gravity  = android.view.Gravity.CENTER
+            background = circle(COL_HOLD_IDLE)
+        }
+        holdView.addView(holdBtn, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+
+        val lsz = px(22)
+        holdLockBtn = TextView(this).apply {
+            text        = "🔒"
+            textSize    = 10f
+            setTextColor(Color.WHITE)
+            gravity     = android.view.Gravity.CENTER
+            background  = lockBg(true)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { toggleHoldLock() }
+        }
+        holdView.addView(holdLockBtn, FrameLayout.LayoutParams(lsz, lsz).apply {
+            gravity = Gravity.TOP or Gravity.END
+        })
+
+        holdParams = WindowManager.LayoutParams(sz, sz,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            BASE_FLAGS,   // ASLA FLAG_NOT_TOUCHABLE eklenmez
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = prefs.getInt(PREF_HOLD_X, 16)
+            y = prefs.getInt(PREF_HOLD_Y, 400)
+        }
+
+        holdView.setOnTouchListener { _, ev -> onHoldTouch(ev) }
+        runCatching { wm.addView(holdView, holdParams) }
+    }
+
+    private fun onHoldTouch(ev: MotionEvent): Boolean {
+        when (ev.action) {
+            MotionEvent.ACTION_DOWN -> {
+                holdInitX = holdParams.x; holdInitY = holdParams.y
+                holdTouchX = ev.rawX; holdTouchY = ev.rawY
+                holdDragging = false
+                if (holdLocked && !isTapping) {
+                    // 150ms basılı tut → tapping başlar
+                    handler.postDelayed({
+                        if (!holdDragging && !isTapping) startTapping()
+                    }, LONG_PRESS_MS)
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.rawX - holdTouchX; val dy = ev.rawY - holdTouchY
+                if (!holdLocked) {
+                    if (!holdDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) holdDragging = true
+                    if (holdDragging) {
+                        holdParams.x = holdInitX + dx.toInt()
+                        holdParams.y = holdInitY + dy.toInt()
+                        runCatching { wm.updateViewLayout(holdView, holdParams) }
+                    }
+                } else if (!isTapping && !holdDragging && (Math.abs(dx) > 15 || Math.abs(dy) > 15)) {
+                    holdDragging = true
+                    handler.removeCallbacksAndMessages(null)
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                // ★ ANA ÇALIŞMA PRENSİBİ:
+                // holdView HER ZAMAN touchable → ACTION_UP burada alınır.
+                // Tapping aktifken parmak kalktı = DUR.
+                if (isTapping) stopTapping()
+                else handler.removeCallbacksAndMessages(null)
+                if (!holdLocked && holdDragging) {
+                    prefs.edit().putInt(PREF_HOLD_X, holdParams.x).putInt(PREF_HOLD_Y, holdParams.y).apply()
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                // Sistem iptal → tapping aktifse devam et (telefon titreşimi vb.)
+                if (!isTapping) handler.removeCallbacksAndMessages(null)
+            }
+        }
+        return true
+    }
+
+    private fun toggleHoldLock() {
+        if (isTapping) stopTapping()
+        holdLocked = !holdLocked
+        holdLockBtn.text = if (holdLocked) "🔒" else "🔓"
+        holdLockBtn.background = lockBg(holdLocked)
+    }
+
+    // ── Hedef Nokta ───────────────────────────────────────────────────────────
+
+    private fun buildTargetView(sz: Int) {
+        val tsz = px(52)   // hedef biraz küçük
+        targetView = TextView(this).apply {
+            text     = "⊕"
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            gravity  = android.view.Gravity.CENTER
+            background = circle(COL_TARGET_IDLE)
+        }
+
+        targetParams = WindowManager.LayoutParams(tsz, tsz,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // Başta sürüklenebilir (kilitsiz)
             BASE_FLAGS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = prefs.getInt(PREF_X, 100)
-            y = prefs.getInt(PREF_Y, 300)
+            x = prefs.getInt(PREF_TARGET_X, 400)
+            y = prefs.getInt(PREF_TARGET_Y, 600)
         }
 
-        floatingView.setOnTouchListener { _, event -> handleTouch(event) }
-        runCatching { windowManager.addView(floatingView, params) }
+        targetView.setOnTouchListener { _, ev -> onTargetTouch(ev) }
+        runCatching { wm.addView(targetView, targetParams) }
     }
 
-    // ─── Touch işleme ────────────────────────────────────────────────────────
-
-    private fun handleTouch(event: MotionEvent): Boolean {
-        return when (event.action) {
-
+    private fun onTargetTouch(ev: MotionEvent): Boolean {
+        // Tapping sırasında FLAG_NOT_TOUCHABLE → bu touch listener çalışmaz.
+        // Sadece idle modda sürükleme için çalışır.
+        if (isTapping) return false
+        when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
-                initialX    = params.x
-                initialY    = params.y
-                touchStartX = event.rawX
-                touchStartY = event.rawY
-                isDragging  = false
-
-                if (isLocked) {
-                    if (isTapping) {
-                        // Tapping aktifken butona basıldı = DURDUR
-                        stopTapping()
-                    } else {
-                        // 150ms basılı tut → tapping başlar
-                        handler.postDelayed({ if (!isDragging) startTapping() }, LONG_PRESS_THRESHOLD_MS)
-                    }
-                }
-                true
+                tgtInitX = targetParams.x; tgtInitY = targetParams.y
+                tgtTouchX = ev.rawX; tgtTouchY = ev.rawY
+                tgtDragging = false
             }
-
             MotionEvent.ACTION_MOVE -> {
-                val dx = event.rawX - touchStartX
-                val dy = event.rawY - touchStartY
-
-                if (!isLocked) {
-                    if (!isDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) isDragging = true
-                    if (isDragging) {
-                        params.x = initialX + dx.toInt()
-                        params.y = initialY + dy.toInt()
-                        runCatching { windowManager.updateViewLayout(floatingView, params) }
-                    }
-                } else if (!isTapping) {
-                    if (!isDragging && (Math.abs(dx) > 15 || Math.abs(dy) > 15)) {
-                        isDragging = true
-                        handler.removeCallbacksAndMessages(null)
-                    }
+                val dx = ev.rawX - tgtTouchX; val dy = ev.rawY - tgtTouchY
+                if (!tgtDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) tgtDragging = true
+                if (tgtDragging) {
+                    targetParams.x = tgtInitX + dx.toInt()
+                    targetParams.y = tgtInitY + dy.toInt()
+                    runCatching { wm.updateViewLayout(targetView, targetParams) }
                 }
-                true
             }
-
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (!isTapping) {
-                    handler.removeCallbacksAndMessages(null)
+            MotionEvent.ACTION_UP -> {
+                if (tgtDragging) {
+                    prefs.edit().putInt(PREF_TARGET_X, targetParams.x).putInt(PREF_TARGET_Y, targetParams.y).apply()
                 }
-                if (!isLocked && isDragging && event.action == MotionEvent.ACTION_UP) {
-                    prefs.edit().putInt(PREF_X, params.x).putInt(PREF_Y, params.y).apply()
-                }
-                true
             }
-
-            else -> false
         }
+        return true
     }
 
-    // ─── View oluşturma ──────────────────────────────────────────────────────
-
-    private fun buildView(sizePx: Int): FrameLayout {
-        val frame = FrameLayout(this)
-
-        mainButton = TextView(this).apply {
-            text     = "TAP"
-            textSize = 11f
-            setTextColor(Color.WHITE)
-            gravity  = Gravity.CENTER
-            background = circleDrawable(COLOR_IDLE)
-        }
-        frame.addView(mainButton, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        ))
-
-        val lockPx = dpToPx(22)
-        lockBtn = TextView(this).apply {
-            text        = lockIcon(isLocked)
-            textSize    = 10f
-            setTextColor(Color.WHITE)
-            gravity     = Gravity.CENTER
-            background  = lockDrawable(isLocked)
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { toggleLock() }
-        }
-        frame.addView(lockBtn, FrameLayout.LayoutParams(lockPx, lockPx).apply {
-            gravity     = Gravity.TOP or Gravity.END
-            topMargin   = dpToPx(2)
-            rightMargin = dpToPx(2)
-        })
-
-        return frame
-    }
-
-    // ─── Kilit toggle ─────────────────────────────────────────────────────────
-
-    private fun toggleLock() {
-        if (isTapping) stopTapping()
-        isLocked = !isLocked
-        prefs.edit().putBoolean(PREF_LOCKED, isLocked).apply()
-        lockBtn.text       = lockIcon(isLocked)
-        lockBtn.background = lockDrawable(isLocked)
-        mainButton.background = circleDrawable(COLOR_IDLE)
-    }
-
-    private fun lockIcon(locked: Boolean) = if (locked) "🔒" else "🔓"
-
-    // ─── Tapping ──────────────────────────────────────────────────────────────
+    // ─── Tapping ─────────────────────────────────────────────────────────────
 
     private fun startTapping() {
         if (isTapping) return
-        isTapping   = true
+        isTapping = true
         flashToggle = false
         WifiAdbHelper.tapping = true
 
-        // Tap hedefini şu anki buton konumunun merkezinden hesapla
-        val loc = IntArray(2)
-        floatingView.getLocationOnScreen(loc)
-        tapTargetX = loc[0] + (params.width / 2)
-        tapTargetY = loc[1] + (params.height / 2)
+        holdBtn.text = "●"
+        holdBtn.background = circle(COL_HOLD_ACTIVE)
 
-        // Butonun şu anki konumunu kaydet (durdurulunca buraya dönecek)
-        savedX = params.x
-        savedY = params.y
-
-        // Butonu köşeye taşı → oyun alanı tamamen serbest kalır
-        // ADB taplar hâlâ tapTargetX/Y hedefine gider (butonun eski yerine)
-        params.x = dpToPx(STOP_X_DP)
-        params.y = dpToPx(STOP_Y_DP)
-        runCatching { windowManager.updateViewLayout(floatingView, params) }
-
-        mainButton.text = "⏹"
-        mainButton.background = circleDrawable(COLOR_STOP)
+        // ★ Hedef noktayı FLAG_NOT_TOUCHABLE yap → ADB taplar oyuna geçer
+        targetParams.flags = BASE_FLAGS or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        targetView.background = circle(COL_TARGET_TAP)
+        runCatching { wm.updateViewLayout(targetView, targetParams) }
 
         val interval = prefs.getLong(PREF_TAP_INTERVAL, DEFAULT_TAP_INTERVAL_MS)
         tapRunnable = object : Runnable {
             override fun run() {
                 if (!isTapping) return
                 flashToggle = !flashToggle
-                mainButton.background = circleDrawable(if (flashToggle) COLOR_GREEN else COLOR_RED)
+                targetView.background = circle(if (flashToggle) COL_TARGET_TAP else COL_TARGET_IDLE)
                 sendTap()
                 handler.postDelayed(this, interval)
             }
@@ -287,40 +311,43 @@ class FloatingButtonService : Service() {
     }
 
     private fun stopTapping() {
+        if (!isTapping) return
         isTapping = false
         WifiAdbHelper.tapping = false
         tapRunnable?.let { handler.removeCallbacks(it) }
         tapRunnable = null
 
-        // Butonu eski yerine geri taşı
-        params.x = savedX
-        params.y = savedY
-        runCatching { windowManager.updateViewLayout(floatingView, params) }
+        holdBtn.text = "TUT"
+        holdBtn.background = circle(COL_HOLD_IDLE)
 
-        if (::mainButton.isInitialized) {
-            mainButton.text = "TAP"
-            mainButton.background = circleDrawable(COLOR_IDLE)
-        }
+        // Hedef noktayı tekrar sürüklenebilir yap
+        targetParams.flags = BASE_FLAGS
+        targetView.background = circle(COL_TARGET_IDLE)
+        runCatching { wm.updateViewLayout(targetView, targetParams) }
     }
 
     private fun sendTap() {
-        // tapTargetX/Y = tapping başlamadan önceki buton merkezi (oyundaki asıl hedef)
-        Thread { WifiAdbHelper.sendTap(applicationContext, tapTargetX, tapTargetY) }.start()
+        // Hedef noktanın ekran konumu
+        val loc = IntArray(2)
+        targetView.getLocationOnScreen(loc)
+        val x = loc[0] + (targetParams.width / 2)
+        val y = loc[1] + (targetParams.height / 2)
+        Thread { WifiAdbHelper.sendTap(applicationContext, x, y) }.start()
     }
 
-    // ─── Drawable'lar ─────────────────────────────────────────────────────────
+    // ─── Drawable ─────────────────────────────────────────────────────────────
 
-    private fun circleDrawable(colorHex: String) =
+    private fun circle(hex: String) =
         android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.OVAL
-            setColor(Color.parseColor(colorHex))
+            setColor(Color.parseColor(hex))
             setStroke(4, Color.WHITE)
         }
 
-    private fun lockDrawable(locked: Boolean) =
+    private fun lockBg(locked: Boolean) =
         android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.OVAL
-            setColor(Color.parseColor(if (locked) "#DD795548" else "#DD2E7D32"))
+            setColor(Color.parseColor(if (locked) COL_LOCK_ON else COL_LOCK_OFF))
             setStroke(2, Color.parseColor("#88FFFFFF"))
         }
 
@@ -330,22 +357,16 @@ class FloatingButtonService : Service() {
         val stopPI = PendingIntent.getService(this, 0,
             Intent(this, FloatingButtonService::class.java).apply { action = ACTION_STOP },
             PendingIntent.FLAG_IMMUTABLE)
-        val openPI = PendingIntent.getActivity(this, 1,
-            Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("ADB Tap Button")
-            .setContentText("🔒=tap modu  🔓=sürükleme modu")
+            .setContentText("🔵 TUT = basılı tut/çek  •  🔴 ⊕ = hedef konuma sürükle")
             .setSmallIcon(android.R.drawable.ic_menu_send)
-            .setContentIntent(openPI)
             .addAction(android.R.drawable.ic_delete, "Durdur", stopPI)
-            .setOngoing(true)
-            .build()
+            .setOngoing(true).build()
     }
 
     private fun createNotificationChannel() {
         val ch = NotificationChannel(CHANNEL_ID, "ADB Tap Button", NotificationManager.IMPORTANCE_LOW)
-            .apply { description = "Yüzen buton servisi" }
         getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
     }
 }
