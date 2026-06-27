@@ -39,15 +39,19 @@ class FloatingButtonService : Service() {
         private const val DEFAULT_TAP_INTERVAL_MS = 100L
         private const val LONG_PRESS_THRESHOLD_MS = 150L
 
-        // Temel flag seti — FLAG_NOT_TOUCHABLE OLMADAN başlıyoruz
+        // Tapping başlarken buton bu konuma taşınır (stop butonu olur)
+        private const val STOP_X_DP = 8
+        private const val STOP_Y_DP = 8
+
+        private const val COLOR_IDLE  = "#CC2196F3"
+        private const val COLOR_RED   = "#CCF44336"
+        private const val COLOR_GREEN = "#CC4CAF50"
+        private const val COLOR_STOP  = "#CC9C27B0"  // mor = stop modu
+
+        // Temel flag: overlay yeni dokunuşlara kapalı değil başlangıçta
         private const val BASE_FLAGS =
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-
-        // Renk sabitleri
-        private const val COLOR_IDLE  = "#CC2196F3"  // mavi
-        private const val COLOR_RED   = "#CCF44336"  // kırmızı
-        private const val COLOR_GREEN = "#CC4CAF50"  // yeşil
 
         @Volatile var isRunning = false
             private set
@@ -61,12 +65,18 @@ class FloatingButtonService : Service() {
     private val handler = Handler(Looper.getMainLooper())
 
     private var tapRunnable: Runnable? = null
-    private var isTapping  = false
+    private var isTapping   = false
     private var flashToggle = false
 
-    // Hareket kilidi: true = kilitli (tap modu), false = açık (sürükleme modu)
-    private var isLocked = true
+    // Tapping öncesindeki gerçek buton konumu (stop sonrası buraya döner)
+    private var savedX = 100
+    private var savedY = 300
 
+    // Gerçek tap hedefi (piksel) — buton oyun alanındayken hesaplanır
+    private var tapTargetX = 0
+    private var tapTargetY = 0
+
+    private var isLocked    = true
     private var initialX    = 0
     private var initialY    = 0
     private var touchStartX = 0f
@@ -116,7 +126,7 @@ class FloatingButtonService : Service() {
         params = WindowManager.LayoutParams(
             sizePx, sizePx,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            BASE_FLAGS,   // Başta dokunulabilir (FLAG_NOT_TOUCHABLE yok)
+            BASE_FLAGS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -141,11 +151,13 @@ class FloatingButtonService : Service() {
                 isDragging  = false
 
                 if (isLocked) {
-                    // KİLİTLİ: 150ms basılı tut → tap başlar
-                    // startTapping() FLAG_NOT_TOUCHABLE ekler; böylece ADB taplar
-                    // ve diğer parmaklar arka plan uygulamaya geçer.
-                    // Mevcut touch sequence (bu parmağın ACTION_UP'ı) yine overlay'e gelir.
-                    handler.postDelayed({ if (!isDragging) startTapping() }, LONG_PRESS_THRESHOLD_MS)
+                    if (isTapping) {
+                        // Tapping aktifken butona basıldı = DURDUR
+                        stopTapping()
+                    } else {
+                        // 150ms basılı tut → tapping başlar
+                        handler.postDelayed({ if (!isDragging) startTapping() }, LONG_PRESS_THRESHOLD_MS)
+                    }
                 }
                 true
             }
@@ -155,30 +167,26 @@ class FloatingButtonService : Service() {
                 val dy = event.rawY - touchStartY
 
                 if (!isLocked) {
-                    // SERBEST: sürükleme modu
                     if (!isDragging && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) isDragging = true
                     if (isDragging) {
                         params.x = initialX + dx.toInt()
                         params.y = initialY + dy.toInt()
                         runCatching { windowManager.updateViewLayout(floatingView, params) }
                     }
-                } else {
-                    // KİLİTLİ: çok kaydıysa long-press iptal
+                } else if (!isTapping) {
                     if (!isDragging && (Math.abs(dx) > 15 || Math.abs(dy) > 15)) {
                         isDragging = true
                         handler.removeCallbacksAndMessages(null)
-                        if (isTapping) stopTapping()
                     }
                 }
                 true
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                handler.removeCallbacksAndMessages(null)
-                // Parmak kalktı → tap durur (hold-to-tap modeli)
-                if (isTapping) stopTapping()
-
-                if (!isLocked && isDragging) {
+                if (!isTapping) {
+                    handler.removeCallbacksAndMessages(null)
+                }
+                if (!isLocked && isDragging && event.action == MotionEvent.ACTION_UP) {
                     prefs.edit().putInt(PREF_X, params.x).putInt(PREF_Y, params.y).apply()
                 }
                 true
@@ -193,7 +201,6 @@ class FloatingButtonService : Service() {
     private fun buildView(sizePx: Int): FrameLayout {
         val frame = FrameLayout(this)
 
-        // Ana TAP dairesi
         mainButton = TextView(this).apply {
             text     = "TAP"
             textSize = 11f
@@ -206,14 +213,13 @@ class FloatingButtonService : Service() {
             FrameLayout.LayoutParams.MATCH_PARENT
         ))
 
-        // Küçük kilit toggle — sağ üst köşede
         val lockPx = dpToPx(22)
         lockBtn = TextView(this).apply {
-            text      = lockIcon(isLocked)
-            textSize  = 10f
+            text        = lockIcon(isLocked)
+            textSize    = 10f
             setTextColor(Color.WHITE)
-            gravity   = Gravity.CENTER
-            background = lockDrawable(isLocked)
+            gravity     = Gravity.CENTER
+            background  = lockDrawable(isLocked)
             isClickable = true
             isFocusable = true
             setOnClickListener { toggleLock() }
@@ -227,20 +233,20 @@ class FloatingButtonService : Service() {
         return frame
     }
 
-    // ─── Kilit toggle ────────────────────────────────────────────────────────
+    // ─── Kilit toggle ─────────────────────────────────────────────────────────
 
     private fun toggleLock() {
+        if (isTapping) stopTapping()
         isLocked = !isLocked
         prefs.edit().putBoolean(PREF_LOCKED, isLocked).apply()
         lockBtn.text       = lockIcon(isLocked)
         lockBtn.background = lockDrawable(isLocked)
-        if (!isLocked && isTapping) stopTapping()
         mainButton.background = circleDrawable(COLOR_IDLE)
     }
 
     private fun lockIcon(locked: Boolean) = if (locked) "🔒" else "🔓"
 
-    // ─── Tapping ─────────────────────────────────────────────────────────────
+    // ─── Tapping ──────────────────────────────────────────────────────────────
 
     private fun startTapping() {
         if (isTapping) return
@@ -248,19 +254,29 @@ class FloatingButtonService : Service() {
         flashToggle = false
         WifiAdbHelper.tapping = true
 
-        // ANA FİX: overlay'i dokunulamaz yap → ADB input tap altta kalan uygulamaya gider
-        // Overlay touchable kalırsa kendi gönderdiği tap'ı kendisi alır ve tapRunnable'ı iptal eder
-        params.flags = BASE_FLAGS or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        // Tap hedefini şu anki buton konumunun merkezinden hesapla
+        val loc = IntArray(2)
+        floatingView.getLocationOnScreen(loc)
+        tapTargetX = loc[0] + (params.width / 2)
+        tapTargetY = loc[1] + (params.height / 2)
+
+        // Butonun şu anki konumunu kaydet (durdurulunca buraya dönecek)
+        savedX = params.x
+        savedY = params.y
+
+        // Butonu köşeye taşı → oyun alanı tamamen serbest kalır
+        // ADB taplar hâlâ tapTargetX/Y hedefine gider (butonun eski yerine)
+        params.x = dpToPx(STOP_X_DP)
+        params.y = dpToPx(STOP_Y_DP)
         runCatching { windowManager.updateViewLayout(floatingView, params) }
 
-        mainButton.background = circleDrawable(COLOR_RED)
+        mainButton.text = "⏹"
+        mainButton.background = circleDrawable(COLOR_STOP)
 
         val interval = prefs.getLong(PREF_TAP_INTERVAL, DEFAULT_TAP_INTERVAL_MS)
-
         tapRunnable = object : Runnable {
             override fun run() {
                 if (!isTapping) return
-                // Yeşil-kırmızı flash — her tap'ta renk değişir
                 flashToggle = !flashToggle
                 mainButton.background = circleDrawable(if (flashToggle) COLOR_GREEN else COLOR_RED)
                 sendTap()
@@ -276,23 +292,23 @@ class FloatingButtonService : Service() {
         tapRunnable?.let { handler.removeCallbacks(it) }
         tapRunnable = null
 
-        // FLAG_NOT_TOUCHABLE kaldır → overlay tekrar dokunulabilir
-        params.flags = BASE_FLAGS
+        // Butonu eski yerine geri taşı
+        params.x = savedX
+        params.y = savedY
         runCatching { windowManager.updateViewLayout(floatingView, params) }
 
-        if (::mainButton.isInitialized) mainButton.background = circleDrawable(COLOR_IDLE)
+        if (::mainButton.isInitialized) {
+            mainButton.text = "TAP"
+            mainButton.background = circleDrawable(COLOR_IDLE)
+        }
     }
 
     private fun sendTap() {
-        // getLocationOnScreen → gerçek piksel koordinatları (status bar dahil)
-        val loc = IntArray(2)
-        floatingView.getLocationOnScreen(loc)
-        val x = loc[0] + (params.width / 2)
-        val y = loc[1] + (params.height / 2)
-        Thread { WifiAdbHelper.sendTap(applicationContext, x, y) }.start()
+        // tapTargetX/Y = tapping başlamadan önceki buton merkezi (oyundaki asıl hedef)
+        Thread { WifiAdbHelper.sendTap(applicationContext, tapTargetX, tapTargetY) }.start()
     }
 
-    // ─── Renkler & Drawable'lar ───────────────────────────────────────────────
+    // ─── Drawable'lar ─────────────────────────────────────────────────────────
 
     private fun circleDrawable(colorHex: String) =
         android.graphics.drawable.GradientDrawable().apply {
