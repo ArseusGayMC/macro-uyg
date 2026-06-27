@@ -35,7 +35,8 @@ import androidx.core.app.NotificationCompat
 class FloatingButtonService : Service() {
 
     companion object {
-        const val ACTION_STOP = "com.adbbutton.app.ACTION_STOP"
+        const val ACTION_START = "com.adbbutton.app.ACTION_START"
+        const val ACTION_STOP  = "com.adbbutton.app.ACTION_STOP"
         const val PREF_NAME      = "FloatingButtonPrefs"
         const val PREF_HOLD_X   = "hold_x"
         const val PREF_HOLD_Y   = "hold_y"
